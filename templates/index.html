@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor de Segurança de Rede</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        .card {
+            margin-bottom: 20px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .card-header {
+            font-weight: bold;
+        }
+        .alert-critical {
+            background-color: #f8d7da;
+            border-left: 4px solid #dc3545;
+        }
+        .alert-warning {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+        }
+        .alert-info {
+            background-color: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+        }
+        .port-open {
+            color: #dc3545;
+            font-weight: bold;
+        }
+        .port-closed {
+            color: #28a745;
+        }
+        #loading {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid py-4">
+        <div class="row">
+            <div class="col-md-12">
+                <h1 class="text-center mb-4">
+                    <i class="bi bi-shield-lock"></i> Monitor de Segurança de Rede
+                </h1>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header bg-primary text-white">
+                        <i class="bi bi-search"></i> Descobrir Dispositivos
+                    </div>
+                    <div class="card-body">
+                        <button id="discover-btn" class="btn btn-primary">
+                            <span id="discover-text">Descobrir Dispositivos</span>
+                            <span id="discover-spinner" class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                        </button>
+                        <div id="devices-list" class="mt-3"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header bg-info text-white">
+                        <i class="bi bi-plug"></i> Verificar Porta Específica
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="ip-single" class="form-label">Endereço IP</label>
+                            <input type="text" class="form-control" id="ip-single" placeholder="Ex: 192.168.1.1">
+                        </div>
+                        <div class="mb-3">
+                            <label for="port-number" class="form-label">Número da Porta</label>
+                            <input type="number" class="form-control" id="port-number" placeholder="Ex: 80">
+                        </div>
+                        <button id="scan-port-btn" class="btn btn-info">
+                            Verificar Porta
+                            <span id="port-spinner" class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                        </button>
+                        <div id="port-result" class="mt-3"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header bg-warning text-dark">
+                        <i class="bi bi-list-check"></i> Escanear Portas Comuns
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="ip-common" class="form-label">Endereço IP</label>
+                            <input type="text" class="form-control" id="ip-common" placeholder="Ex: 192.168.1.1">
+                        </div>
+                        <button id="scan-common-btn" class="btn btn-warning">
+                            Escanear Portas Comuns
+                            <span id="common-spinner" class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                        </button>
+                        <div id="common-ports-result" class="mt-3"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header bg-success text-white">
+                        <i class="bi bi-graph-up"></i> Estatísticas
+                    </div>
+                    <div class="card-body">
+                        <div id="stats-container">
+                            <p class="text-center text-muted">Carregando estatísticas...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header bg-danger text-white">
+                        <i class="bi bi-exclamation-triangle"></i> Alertas Recentes
+                    </div>
+                    <div class="card-body">
+                        <div id="alerts-container">
+                            <p class="text-center text-muted">Carregando alertas...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Função para formatar a data
+        function formatDate(dateString) {
+            const options = { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+            return new Date(dateString).toLocaleDateString('pt-BR', options);
+        }
+
+        // Função para carregar alertas
+        function loadAlerts() {
+            fetch('/alerts')
+                .then(response => response.json())
+                .then(data => {
+                    const container = document.getElementById('alerts-container');
+                    if (data.alerts.length === 0) {
+                        container.innerHTML = '<p class="text-center text-muted">Nenhum alerta registrado.</p>';
+                        return;
+                    }
+
+                    let html = '';
+                    data.alerts.slice(0, 5).forEach(alert => {
+                        let alertClass = 'alert-info';
+                        if (alert.type.includes('CRÍTICO') || alert.type.includes('Telnet') || alert.type.includes('RDP')) {
+                            alertClass = 'alert-critical';
+                        } else if (alert.type.includes('ALERTA')) {
+                            alertClass = 'alert-warning';
+                        }
+
+                        html += `
+                            <div class="alert ${alertClass} mb-2 p-2">
+                                <div class="d-flex justify-content-between">
+                                    <strong>${alert.type}</strong>
+                                    <small>${formatDate(alert.timestamp)}</small>
+                                </div>
+                                <div>${alert.message}</div>
+                                <small>IP: ${alert.ip} ${alert.port ? '| Porta: ' + alert.port : ''}</small>
+                            </div>
+                        `;
+                    });
+
+                    if (data.alerts.length > 5) {
+                        html += `<p class="text-end mt-2"><a href="#" onclick="showAllAlerts()">Ver todos (${data.alerts.length})</a></p>`;
+                    }
+
+                    container.innerHTML = html;
+                });
+        }
+
+        // Função para carregar estatísticas
+        function loadStats() {
+            fetch('/stats')
+                .then(response => response.json())
+                .then(data => {
+                    const container = document.getElementById('stats-container');
+                    
+                    let html = `
+                        <div class="mb-3">
+                            <h5>Total de Alertas</h5>
+                            <div class="display-4">${data.total_alerts}</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <h5>Alertas por Tipo</h5>
+                            <ul class="list-group">
+                    `;
+
+                    for (const [type, count] of Object.entries(data.alerts_by_type)) {
+                        html += `
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                ${type}
+                                <span class="badge bg-primary rounded-pill">${count}</span>
+                            </li>
+                        `;
+                    }
+
+                    html += `
+                            </ul>
+                        </div>
+                        
+                        <div>
+                            <h5>IPs Mais Problemáticos</h5>
+                            <ul class="list-group">
+                    `;
+
+                    data.problematic_ips.forEach(ip => {
+                        html += `
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                ${ip[0]}
+                                <span class="badge bg-danger rounded-pill">${ip[1]}</span>
+                            </li>
+                        `;
+                    });
+
+                    html += `</ul></div>`;
+
+                    container.innerHTML = html;
+                });
+        }
+
+        // Função para descobrir dispositivos
+        document.getElementById('discover-btn').addEventListener('click', function() {
+            const btn = this;
+            const textSpan = document.getElementById('discover-text');
+            const spinner = document.getElementById('discover-spinner');
+            
+            textSpan.textContent = 'Descobrindo...';
+            spinner.style.display = 'inline-block';
+            btn.disabled = true;
+            
+            fetch('/discover')
+                .then(response => response.json())
+                .then(data => {
+                    const container = document.getElementById('devices-list');
+                    
+                    if (data.devices.length === 0) {
+                        container.innerHTML = '<div class="alert alert-warning">Nenhum dispositivo encontrado.</div>';
+                        return;
+                    }
+                    
+                    let html = '<div class="list-group">';
+                    data.devices.forEach(device => {
+                        const isLocalhost = device === '127.0.0.1';
+                        html += `
+                            <div class="list-group-item">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span>${device}</span>
+                                    <span class="badge ${isLocalhost ? 'bg-secondary' : 'bg-success'}">
+                                        ${isLocalhost ? 'Localhost' : 'Dispositivo de Rede'}
+                                    </span>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    html += '</div>';
+                    
+                    container.innerHTML = html;
+                    
+                    // Preenche os campos de IP
+                    if (data.devices.length > 1) {
+                        document.getElementById('ip-single').value = data.devices[1]; // Primeiro IP não localhost
+                        document.getElementById('ip-common').value = data.devices[1];
+                    }
+                })
+                .finally(() => {
+                    textSpan.textContent = 'Descobrir Dispositivos';
+                    spinner.style.display = 'none';
+                    btn.disabled = false;
+                });
+        });
+
+        // Função para escanear portas comuns
+        document.getElementById('scan-common-btn').addEventListener('click', function() {
+            const ip = document.getElementById('ip-common').value.trim();
+            if (!ip) {
+                alert('Por favor, insira um endereço IP');
+                return;
+            }
+            
+            const btn = this;
+            const spinner = document.getElementById('common-spinner');
+            const resultDiv = document.getElementById('common-ports-result');
+            
+            btn.disabled = true;
+            spinner.style.display = 'inline-block';
+            resultDiv.innerHTML = '<p>Escaneando portas... Isso pode levar alguns segundos.</p>';
+            
+            fetch('/scan_common_ports', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `ip=${encodeURIComponent(ip)}`
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    resultDiv.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                    return;
+                }
+                
+                let html = '<h5>Resultados do Escaneamento</h5><table class="table table-sm"><thead><tr><th>Porta</th><th>Serviço</th><th>Status</th></tr></thead><tbody>';
+                
+                const ports = {
+                    21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP",
+                    53: "DNS", 80: "HTTP", 443: "HTTPS", 3306: "MySQL", 3389: "RDP"
+                };
+                
+                for (const [port, isOpen] of Object.entries(data.results)) {
+                    const service = ports[parseInt(port)] || 'Desconhecido';
+                    html += `
+                        <tr>
+                            <td>${port}</td>
+                            <td>${service}</td>
+                            <td class="${isOpen ? 'port-open' : 'port-closed'}">
+                                ${isOpen ? 'ABERTA' : 'fechada'}
+                                ${port === '23' || port === '3389' && isOpen ? '<i class="bi bi-exclamation-triangle-fill text-warning"></i>' : ''}
+                            </td>
+                        </tr>
+                    `;
+                }
+                
+                html += '</tbody></table>';
+                
+                const openPorts = Object.values(data.results).filter(x => x).length;
+                if (openPorts > 0) {
+                    html += `<div class="alert alert-warning mt-2">
+                        <i class="bi bi-exclamation-triangle"></i> ${openPorts} porta(s) aberta(s) encontrada(s).
+                    </div>`;
+                } else {
+                    html += '<div class="alert alert-success mt-2">Nenhuma porta comum aberta encontrada.</div>';
+                }
+                
+                resultDiv.innerHTML = html;
+                loadAlerts(); // Atualiza a lista de alertas
+                loadStats(); // Atualiza as estatísticas
+            })
+            .finally(() => {
+                btn.disabled = false;
+                spinner.style.display = 'none';
+            });
+        });
+
+        // Função para verificar porta específica
+        document.getElementById('scan-port-btn').addEventListener('click', function() {
+            const ip = document.getElementById('ip-single').value.trim();
+            const port = document.getElementById('port-number').value.trim();
+            
+            if (!ip) {
+                alert('Por favor, insira um endereço IP');
+                return;
+            }
+            
+            if (!port) {
+                alert('Por favor, insira um número de porta');
+                return;
+            }
+            
+            const btn = this;
+            const spinner = document.getElementById('port-spinner');
+            const resultDiv = document.getElementById('port-result');
+            
+            btn.disabled = true;
+            spinner.style.display = 'inline-block';
+            resultDiv.innerHTML = '<p>Verificando porta...</p>';
+            
+            fetch('/scan_port', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `ip=${encodeURIComponent(ip)}&port=${encodeURIComponent(port)}`
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    resultDiv.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                    return;
+                }
+                
+                const status = data.is_open ? 'ABERTA' : 'fechada';
+                const alertClass = data.is_open ? 'alert-danger' : 'alert-success';
+                
+                resultDiv.innerHTML = `
+                    <div class="alert ${alertClass}">
+                        Porta ${data.port} está <strong>${status}</strong> no IP ${ip}.
+                    </div>
+                `;
+                
+                loadAlerts(); // Atualiza a lista de alertas
+                loadStats(); // Atualiza as estatísticas
+            })
+            .finally(() => {
+                btn.disabled = false;
+                spinner.style.display = 'none';
+            });
+        });
+
+        // Carrega os dados iniciais
+        loadAlerts();
+        loadStats();
+    </script>
+</body>
+</html>
